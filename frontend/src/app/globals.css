@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+:root {
+  --background: #070a12;
+  --foreground: #eef6ff;
+  --primary: #4de3d0;
+  --secondary: #a78bfa;
+  --accent: #9fb0c7;
+  --border: rgba(148, 163, 184, 0.22);
+  --input-bg: rgba(8, 13, 26, 0.82);
+  --panel: rgba(14, 20, 37, 0.76);
+  --panel-strong: rgba(18, 26, 46, 0.92);
+  --muted: #63708a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --font-sans: var(--font-sora);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 8%, rgba(77, 227, 208, 0.20), transparent 26rem),
+    radial-gradient(circle at 82% 12%, rgba(167, 139, 250, 0.20), transparent 24rem),
+    linear-gradient(135deg, #070a12 0%, #0b1020 46%, #0c1325 100%);
+  color: var(--foreground);
+  font-family: var(--font-sora), sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(77, 227, 208, 0.32);
+  color: #ffffff;
+}
+
+.cyber-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at center, black, transparent 74%);
+}
+
+.panel {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
+    var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.field-surface {
+  background:
+    linear-gradient(180deg, rgba(77, 227, 208, 0.06), rgba(167, 139, 250, 0.035)),
+    var(--input-bg);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
