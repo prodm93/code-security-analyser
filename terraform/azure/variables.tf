@@ -16,21 +16,33 @@ variable "resource_group_name" {
   default     = "cyber-analyzer-rg"
 }
 
-variable "openai_api_key" {
-  description = "OpenAI API key for the application"
+variable "key_vault_id" {
+  description = "Resource ID of an existing RBAC-enabled Key Vault containing application secrets"
   type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "analysis_api_key" {
-  description = "Bearer token required by analysis endpoints"
-  type        = string
-  sensitive   = true
 
   validation {
-    condition     = length(var.analysis_api_key) >= 32
-    error_message = "analysis_api_key must contain at least 32 characters."
+    condition     = length(trimspace(var.key_vault_id)) > 0
+    error_message = "key_vault_id must not be empty."
+  }
+}
+
+variable "openai_api_key_secret_id" {
+  description = "Versioned or versionless Key Vault secret URI containing the OpenAI API key"
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.openai_api_key_secret_id)) > 0
+    error_message = "openai_api_key_secret_id must not be empty."
+  }
+}
+
+variable "analysis_api_key_secret_id" {
+  description = "Versioned or versionless Key Vault secret URI containing the analysis bearer token"
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.analysis_api_key_secret_id)) > 0
+    error_message = "analysis_api_key_secret_id must not be empty."
   }
 }
 
@@ -38,13 +50,6 @@ variable "allow_public_access" {
   description = "Expose Container App ingress externally; application bearer authentication remains required"
   type        = bool
   default     = false
-}
-
-variable "semgrep_app_token" {
-  description = "Semgrep app token for security scanning"
-  type        = string
-  sensitive   = true
-  default     = ""
 }
 
 variable "docker_image_tag" {

@@ -35,6 +35,35 @@ resource "google_project_service" "cloudbuild" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "secretmanager" {
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Give the running service its own identity and access only to its two secrets.
+resource "google_service_account" "app" {
+  account_id   = substr("${var.service_name}-runtime", 0, 30)
+  display_name = "${var.service_name} Cloud Run runtime"
+}
+
+resource "google_secret_manager_secret_iam_member" "openai_api_key" {
+  project   = var.project_id
+  secret_id = var.openai_api_key_secret_name
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app.email}"
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "analysis_api_key" {
+  project   = var.project_id
+  secret_id = var.analysis_api_key_secret_name
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app.email}"
+
+  depends_on = [google_project_service.secretmanager]
+}
+
 # Configure Docker provider to use GCR
 provider "docker" {
   registry_auth {
@@ -89,6 +118,8 @@ resource "google_cloud_run_service" "app" {
 
   template {
     spec {
+      service_account_name = google_service_account.app.email
+
       containers {
         image = docker_image.app.name
 
@@ -100,18 +131,23 @@ resource "google_cloud_run_service" "app" {
         }
 
         env {
-          name  = "OPENAI_API_KEY"
-          value = var.openai_api_key
+          name = "OPENAI_API_KEY"
+          value_from {
+            secret_key_ref {
+              name = var.openai_api_key_secret_name
+              key  = "latest"
+            }
+          }
         }
 
         env {
-          name  = "ANALYSIS_API_KEY"
-          value = var.analysis_api_key
-        }
-
-        env {
-          name  = "SEMGREP_APP_TOKEN"
-          value = var.semgrep_app_token
+          name = "ANALYSIS_API_KEY"
+          value_from {
+            secret_key_ref {
+              name = var.analysis_api_key_secret_name
+              key  = "latest"
+            }
+          }
         }
 
         env {
@@ -146,7 +182,9 @@ resource "google_cloud_run_service" "app" {
 
   depends_on = [
     google_project_service.cloudrun,
-    docker_registry_image.app
+    docker_registry_image.app,
+    google_secret_manager_secret_iam_member.openai_api_key,
+    google_secret_manager_secret_iam_member.analysis_api_key
   ]
 }
 

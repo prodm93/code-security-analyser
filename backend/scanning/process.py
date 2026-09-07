@@ -1,8 +1,11 @@
 """Subprocess seam shared by scanner adapters."""
 
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, Sequence
+
+from scanning.environment import scanner_environment
 
 
 @dataclass(frozen=True)
@@ -18,10 +21,14 @@ class CommandRunner(Protocol):
 
 
 class SubprocessRunner:
+    def __init__(self, environment: Mapping[str, str] | None = None) -> None:
+        self._environment = scanner_environment(environment)
+
     def run(self, command: Sequence[str], timeout_seconds: int) -> ProcessResult:
         completed = subprocess.run(
             list(command),
             capture_output=True,
+            env=self._environment,
             text=True,
             timeout=timeout_seconds,
         )

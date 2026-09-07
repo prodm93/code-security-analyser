@@ -41,6 +41,24 @@ data "azurerm_resource_group" "main" {
   name = var.resource_group_name
 }
 
+# Use a dedicated runtime identity to read application secrets from Key Vault.
+resource "azurerm_user_assigned_identity" "app" {
+  name                = "${var.project_name}-runtime"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+
+  tags = {
+    environment = terraform.workspace
+    project     = var.project_name
+  }
+}
+
+resource "azurerm_role_assignment" "key_vault_secrets" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+}
+
 # Create Azure Container Registry
 resource "azurerm_container_registry" "acr" {
   name                = local.acr_name
@@ -116,6 +134,11 @@ resource "azurerm_container_app" "main" {
   resource_group_name          = data.azurerm_resource_group.main.name
   revision_mode                = "Single"
 
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
   template {
     container {
       name   = "main"
@@ -124,18 +147,13 @@ resource "azurerm_container_app" "main" {
       memory = "2.0Gi"
 
       env {
-        name  = "OPENAI_API_KEY"
-        value = var.openai_api_key
+        name        = "OPENAI_API_KEY"
+        secret_name = "openai-api-key"
       }
 
       env {
-        name  = "ANALYSIS_API_KEY"
-        value = var.analysis_api_key
-      }
-
-      env {
-        name  = "SEMGREP_APP_TOKEN"
-        value = var.semgrep_app_token
+        name        = "ANALYSIS_API_KEY"
+        secret_name = "analysis-api-key"
       }
 
       env {
@@ -174,6 +192,20 @@ resource "azurerm_container_app" "main" {
     name  = "registry-password"
     value = azurerm_container_registry.acr.admin_password
   }
+
+  secret {
+    name                = "openai-api-key"
+    identity            = azurerm_user_assigned_identity.app.id
+    key_vault_secret_id = var.openai_api_key_secret_id
+  }
+
+  secret {
+    name                = "analysis-api-key"
+    identity            = azurerm_user_assigned_identity.app.id
+    key_vault_secret_id = var.analysis_api_key_secret_id
+  }
+
+  depends_on = [azurerm_role_assignment.key_vault_secrets]
 
   tags = {
     environment = terraform.workspace

@@ -15,21 +15,23 @@ variable "service_name" {
   default     = "cyber-analyzer"
 }
 
-variable "openai_api_key" {
-  description = "OpenAI API key for the application"
+variable "openai_api_key_secret_name" {
+  description = "Name of an existing Secret Manager secret containing the OpenAI API key"
   type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "analysis_api_key" {
-  description = "Bearer token required by analysis endpoints"
-  type        = string
-  sensitive   = true
 
   validation {
-    condition     = length(var.analysis_api_key) >= 32
-    error_message = "analysis_api_key must contain at least 32 characters."
+    condition     = length(trimspace(var.openai_api_key_secret_name)) > 0
+    error_message = "openai_api_key_secret_name must not be empty."
+  }
+}
+
+variable "analysis_api_key_secret_name" {
+  description = "Name of an existing Secret Manager secret containing the analysis bearer token"
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.analysis_api_key_secret_name)) > 0
+    error_message = "analysis_api_key_secret_name must not be empty."
   }
 }
 
@@ -37,13 +39,6 @@ variable "allow_public_access" {
   description = "Grant unauthenticated network access to Cloud Run; application bearer authentication remains required"
   type        = bool
   default     = false
-}
-
-variable "semgrep_app_token" {
-  description = "Semgrep app token for security scanning"
-  type        = string
-  sensitive   = true
-  default     = ""
 }
 
 variable "docker_image_tag" {
