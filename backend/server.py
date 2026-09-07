@@ -1,7 +1,9 @@
-import tempfile
-import shutil
-import zipfile
 import os
+import shutil
+import tempfile
+from collections.abc import AsyncIterator
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,10 +23,33 @@ from context import (
     enhance_summary,
 )
 from mcp_servers import create_scanner_server
+from project_archives import (
+    ProjectArchiveRejected,
+    ProjectExpandedTooLarge,
+    ProjectUploadTooLarge,
+    extract_project_archive,
+)
+from resource_limits import (
+    AnalysisCapacity,
+    AnalysisCapacityExceeded,
+    RequestBodyLimitMiddleware,
+    ResourceLimits,
+)
 
 load_dotenv(override=True)
 
+resource_limits = ResourceLimits.from_environment()
+analysis_capacity = AnalysisCapacity(
+    resource_limits.max_concurrent_analyses,
+    resource_limits.queue_timeout_seconds,
+)
+
 app = FastAPI(title="Cybersecurity Analyzer API")
+
+app.add_middleware(
+    RequestBodyLimitMiddleware,
+    path_limits=resource_limits.request_body_limits,
+)
 
 cors_origins = [
     "http://localhost:3000",
@@ -86,13 +111,28 @@ def sort_report(report: SecurityReport) -> SecurityReport:
     return report
 
 
+async def require_analysis_capacity() -> AsyncIterator[None]:
+    try:
+        async with analysis_capacity.reserve():
+            yield
+    except AnalysisCapacityExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Analysis capacity is currently full; retry shortly",
+            headers={"Retry-After": "1"},
+        ) from exc
+
+
 # --- Code analysis (single .py file or pasted code) ---
 
 
 @app.post(
     "/api/analyze",
     response_model=SecurityReport,
-    dependencies=[Depends(require_analysis_api_key)],
+    dependencies=[
+        Depends(require_analysis_api_key),
+        Depends(require_analysis_capacity),
+    ],
 )
 async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
     if not request.code.strip():
@@ -136,26 +176,23 @@ async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
 @app.post(
     "/api/analyze-project",
     response_model=SecurityReport,
-    dependencies=[Depends(require_analysis_api_key)],
+    dependencies=[
+        Depends(require_analysis_api_key),
+        Depends(require_analysis_capacity),
+    ],
 )
 async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
-    if not file.filename or not file.filename.endswith(".zip"):
+    if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Please upload a .zip file")
     check_api_keys()
 
-    extract_dir = tempfile.mkdtemp(prefix="cyber_project_")
+    work_directory = Path(tempfile.mkdtemp(prefix="cyber_project_"))
     try:
-        zip_path = os.path.join(extract_dir, "upload.zip")
-        content = await file.read()
-        with open(zip_path, "wb") as f:
-            f.write(content)
-
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
-        except zipfile.BadZipFile:
-            raise HTTPException(status_code=400, detail="Invalid zip file")
-        os.unlink(zip_path)
+        project_path = await extract_project_archive(
+            file,
+            work_directory,
+            resource_limits.project_archive,
+        )
 
         with trace("Project Analysis"):
             async with create_scanner_server() as scanners:
@@ -166,17 +203,24 @@ async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
                     mcp_servers=[scanners],
                     output_type=SecurityReport,
                 )
-                result = await Runner.run(agent, input=get_project_prompt(extract_dir))
+                result = await Runner.run(
+                    agent, input=get_project_prompt(str(project_path))
+                )
                 report = sort_report(result.final_output_as(SecurityReport))
                 report.summary = f"Analyzed project '{file.filename}'. {report.summary}"
                 return report
+    except (ProjectUploadTooLarge, ProjectExpandedTooLarge) as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except ProjectArchiveRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as e:
         print(f"Unexpected {e=}, {type(e)=}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
     finally:
-        shutil.rmtree(extract_dir, ignore_errors=True)
+        await file.close()
+        shutil.rmtree(work_directory, ignore_errors=True)
 
 
 # --- Container image analysis ---
@@ -185,7 +229,10 @@ async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
 @app.post(
     "/api/analyze-image",
     response_model=SecurityReport,
-    dependencies=[Depends(require_analysis_api_key)],
+    dependencies=[
+        Depends(require_analysis_api_key),
+        Depends(require_analysis_capacity),
+    ],
 )
 async def analyze_image(request: ImageRequest) -> SecurityReport:
     if not request.image.strip():

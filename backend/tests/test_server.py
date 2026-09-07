@@ -2,12 +2,13 @@ import io
 import os
 import unittest
 import zipfile
-from contextlib import nullcontext
+from contextlib import asynccontextmanager, nullcontext
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 import server
+from resource_limits import ProjectArchiveLimits
 
 ANALYSIS_API_KEY = "test-analysis-key-that-is-at-least-32-chars"
 AUTH_HEADERS = {"Authorization": f"Bearer {ANALYSIS_API_KEY}"}
@@ -46,6 +47,13 @@ class FakeAgentResult:
                 },
             ],
         )
+
+
+class FullAnalysisCapacity:
+    @asynccontextmanager
+    async def reserve(self):
+        raise server.AnalysisCapacityExceeded
+        yield
 
 
 class ServerRouteTests(unittest.TestCase):
@@ -101,6 +109,34 @@ class ServerRouteTests(unittest.TestCase):
         agent = self.runner.await_args.args[0]
         self.assertEqual(1, len(agent.mcp_servers))
 
+    def test_project_analysis_rejects_an_expansion_bomb(self) -> None:
+        archive = io.BytesIO()
+        with zipfile.ZipFile(
+            archive, "w", compression=zipfile.ZIP_DEFLATED
+        ) as zip_file:
+            zip_file.writestr("large.py", b"x" * 100)
+        constrained = server.ResourceLimits(
+            code_request_bytes=server.resource_limits.code_request_bytes,
+            image_request_bytes=server.resource_limits.image_request_bytes,
+            project_archive=ProjectArchiveLimits(
+                max_upload_bytes=1_024,
+                max_extracted_bytes=10,
+                max_members=10,
+            ),
+            max_concurrent_analyses=1,
+            queue_timeout_seconds=1,
+        )
+
+        with patch.object(server, "resource_limits", constrained):
+            response = self.client.post(
+                "/api/analyze-project",
+                files={"file": ("project.zip", archive.getvalue(), "application/zip")},
+                headers=AUTH_HEADERS,
+            )
+
+        self.assertEqual(413, response.status_code)
+        self.runner.assert_not_awaited()
+
     def test_image_analysis_route_uses_one_scanner_server(self) -> None:
         response = self.client.post(
             "/api/analyze-image",
@@ -114,6 +150,18 @@ class ServerRouteTests(unittest.TestCase):
         )
         agent = self.runner.await_args.args[0]
         self.assertEqual(1, len(agent.mcp_servers))
+
+    def test_analysis_routes_reject_work_when_capacity_is_full(self) -> None:
+        with patch.object(server, "analysis_capacity", FullAnalysisCapacity()):
+            response = self.client.post(
+                "/api/analyze",
+                json={"code": "print('ok')"},
+                headers=AUTH_HEADERS,
+            )
+
+        self.assertEqual(429, response.status_code)
+        self.assertEqual("1", response.headers["retry-after"])
+        self.runner.assert_not_awaited()
 
     def test_analysis_routes_reject_missing_credentials(self) -> None:
         requests = (
