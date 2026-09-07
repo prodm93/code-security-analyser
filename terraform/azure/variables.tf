@@ -23,6 +23,23 @@ variable "openai_api_key" {
   default     = ""
 }
 
+variable "analysis_api_key" {
+  description = "Bearer token required by analysis endpoints"
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.analysis_api_key) >= 32
+    error_message = "analysis_api_key must contain at least 32 characters."
+  }
+}
+
+variable "allow_public_access" {
+  description = "Expose Container App ingress externally; application bearer authentication remains required"
+  type        = bool
+  default     = false
+}
+
 variable "semgrep_app_token" {
   description = "Semgrep app token for security scanning"
   type        = string

@@ -2,7 +2,7 @@ import tempfile
 import shutil
 import zipfile
 import os
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -10,6 +10,7 @@ from typing import List
 from dotenv import load_dotenv
 from agents import Agent, Runner, trace
 
+from auth import require_analysis_api_key
 from context import (
     CODE_INSTRUCTIONS,
     PROJECT_INSTRUCTIONS,
@@ -88,7 +89,11 @@ def sort_report(report: SecurityReport) -> SecurityReport:
 # --- Code analysis (single .py file or pasted code) ---
 
 
-@app.post("/api/analyze", response_model=SecurityReport)
+@app.post(
+    "/api/analyze",
+    response_model=SecurityReport,
+    dependencies=[Depends(require_analysis_api_key)],
+)
 async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
     if not request.code.strip():
         raise HTTPException(status_code=400, detail="No code provided for analysis")
@@ -128,7 +133,11 @@ async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
 # --- Project analysis (zip upload) ---
 
 
-@app.post("/api/analyze-project", response_model=SecurityReport)
+@app.post(
+    "/api/analyze-project",
+    response_model=SecurityReport,
+    dependencies=[Depends(require_analysis_api_key)],
+)
 async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Please upload a .zip file")
@@ -173,7 +182,11 @@ async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
 # --- Container image analysis ---
 
 
-@app.post("/api/analyze-image", response_model=SecurityReport)
+@app.post(
+    "/api/analyze-image",
+    response_model=SecurityReport,
+    dependencies=[Depends(require_analysis_api_key)],
+)
 async def analyze_image(request: ImageRequest) -> SecurityReport:
     if not request.image.strip():
         raise HTTPException(status_code=400, detail="No image name provided")

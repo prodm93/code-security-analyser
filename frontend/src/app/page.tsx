@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { ChangeEvent } from 'react';
 import type { ScanMode, AnalysisResponse } from '@/types/security';
 import AnalysisResults from '@/components/AnalysisResults';
+import AccessTokenInput from '@/components/AccessTokenInput';
 import ScanTabs from '@/components/ScanTabs';
 import CodeScanInput from '@/components/scan/CodeScanInput';
 import ImageScanInput from '@/components/scan/ImageScanInput';
@@ -22,6 +23,7 @@ const TABS: { mode: ScanMode; label: string }[] = [
 
 export default function Home() {
   const [scanMode, setScanMode] = useState<ScanMode>('code');
+  const [accessToken, setAccessToken] = useState('');
   const [codeContent, setCodeContent] = useState('');
   const [fileName, setFileName] = useState('');
   const [zipFile, setZipFile] = useState<File | null>(null);
@@ -77,6 +79,7 @@ export default function Home() {
   };
 
   const canAnalyze = () => {
+    if (!accessToken.trim()) return false;
     if (scanMode === 'code') return !!codeContent.trim();
     if (scanMode === 'project') return !!zipFile;
     if (scanMode === 'image') return !!imageName.trim();
@@ -90,11 +93,15 @@ export default function Home() {
 
     try {
       let response: Response;
+      const authorization = `Bearer ${accessToken.trim()}`;
 
       if (scanMode === 'code') {
         response = await fetch(`${API_BASE_URL}/api/analyze`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authorization,
+          },
           body: JSON.stringify({ code: codeContent }),
         });
       } else if (scanMode === 'project') {
@@ -102,12 +109,16 @@ export default function Home() {
         formData.append('file', zipFile!);
         response = await fetch(`${API_BASE_URL}/api/analyze-project`, {
           method: 'POST',
+          headers: { Authorization: authorization },
           body: formData,
         });
       } else {
         response = await fetch(`${API_BASE_URL}/api/analyze-image`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authorization,
+          },
           body: JSON.stringify({ image: imageName }),
         });
       }
@@ -143,17 +154,20 @@ export default function Home() {
               Security analysis for Python files, source archives, and container images.
             </p>
           </div>
-          <div className={`rounded-full border px-3 py-1.5 font-mono text-xs transition-colors ${
-            isAnalyzing
-              ? 'border-primary/40 bg-primary/15 text-primary'
-              : 'border-secondary/25 bg-secondary/10 text-secondary'
-          }`}>
-            {isAnalyzing ? (
-              <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary shadow-[0_0_10px_rgba(77,227,208,0.9)]" />
-                SCANNING
-              </span>
-            ) : 'STATUS: READY'}
+          <div className="flex flex-col gap-3 sm:items-end">
+            <AccessTokenInput value={accessToken} onChange={setAccessToken} />
+            <div className={`rounded-full border px-3 py-1.5 font-mono text-xs transition-colors ${
+              isAnalyzing
+                ? 'border-primary/40 bg-primary/15 text-primary'
+                : 'border-secondary/25 bg-secondary/10 text-secondary'
+            }`}>
+              {isAnalyzing ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary shadow-[0_0_10px_rgba(77,227,208,0.9)]" />
+                  SCANNING
+                </span>
+              ) : 'STATUS: READY'}
+            </div>
           </div>
         </header>
 

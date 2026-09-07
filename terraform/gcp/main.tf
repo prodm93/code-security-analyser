@@ -75,7 +75,7 @@ resource "docker_image" "app" {
 # Push Docker image to Artifact Registry
 resource "docker_registry_image" "app" {
   name = docker_image.app.name
-  
+
   depends_on = [
     google_artifact_registry_repository.app,
     docker_image.app
@@ -102,6 +102,11 @@ resource "google_cloud_run_service" "app" {
         env {
           name  = "OPENAI_API_KEY"
           value = var.openai_api_key
+        }
+
+        env {
+          name  = "ANALYSIS_API_KEY"
+          value = var.analysis_api_key
         }
 
         env {
@@ -145,8 +150,9 @@ resource "google_cloud_run_service" "app" {
   ]
 }
 
-# Make the service publicly accessible
+# Public invocation is an explicit opt-in. Analysis endpoints still require a bearer token.
 resource "google_cloud_run_service_iam_member" "public" {
+  count    = var.allow_public_access ? 1 : 0
   service  = google_cloud_run_service.app.name
   location = google_cloud_run_service.app.location
   role     = "roles/run.invoker"
