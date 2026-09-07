@@ -208,14 +208,11 @@ __marimo__/
 
 .DS_Store
 
+# Terraform state and local configuration
 .terraform/
 terraform.tfstate.d/
 *.tfstate
-
-# Terraform files
-*.tfstate
 *.tfstate.*
-.terraform.lock.hcl
 
 # Variable files that might contain secrets
 *.auto.tfvars

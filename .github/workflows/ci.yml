@@ -1,0 +1,164 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  NODE_VERSION: "22.23.2"
+  PYTHON_VERSION: "3.12.14"
+  TERRAFORM_VERSION: "1.15.6"
+  UV_VERSION: "0.10.10"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  backend:
+    name: Backend quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner ownership
+        run: bash scripts/ci/check_runner_ownership.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check "uv==${UV_VERSION}"
+
+      - name: Install locked dependencies
+        working-directory: backend
+        run: uv sync --frozen --dev
+
+      - name: Lint and check formatting
+        working-directory: backend
+        run: |
+          uv run ruff check . ../docker
+          uv run ruff format --check . ../docker
+
+      - name: Run backend tests
+        working-directory: backend
+        run: uv run python -m unittest discover -s tests -v
+
+      - name: Run scanner installer tests
+        run: uv run --project backend python -m unittest discover -s docker/tests -v
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner ownership
+        run: bash scripts/ci/check_runner_ownership.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Audit dependencies
+        working-directory: frontend
+        run: npm audit
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build static frontend
+        working-directory: frontend
+        run: npm run build
+
+  terraform:
+    name: Terraform (${{ matrix.stack }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        stack:
+          - azure
+          - gcp
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner ownership
+        run: bash scripts/ci/check_runner_ownership.sh
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check formatting
+        working-directory: terraform/${{ matrix.stack }}
+        run: terraform fmt -check
+
+      - name: Verify provider lock platforms
+        working-directory: terraform/${{ matrix.stack }}
+        run: |
+          terraform providers lock \
+            -platform=darwin_amd64 \
+            -platform=darwin_arm64 \
+            -platform=linux_amd64
+          git diff --exit-code -- .terraform.lock.hcl
+
+      - name: Initialize providers from the lock file
+        working-directory: terraform/${{ matrix.stack }}
+        run: terraform init -backend=false -input=false -lockfile=readonly
+
+      - name: Validate configuration
+        working-directory: terraform/${{ matrix.stack }}
+        run: terraform validate
+
+  container:
+    name: Production container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner ownership
+        run: bash scripts/ci/check_runner_ownership.sh
+
+      - name: Build image
+        run: docker build --platform linux/amd64 --tag "cyber-trivy-ci:${GITHUB_SHA}" .
+
+      - name: Smoke-test image
+        run: bash docker/smoke_test.sh "cyber-trivy-ci:${GITHUB_SHA}"
