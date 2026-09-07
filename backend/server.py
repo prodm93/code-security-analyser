@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List
@@ -13,6 +12,7 @@ from dotenv import load_dotenv
 from agents import Agent, Runner, trace
 
 from auth import require_analysis_api_key
+from cors_policy import CorsPolicy, install_cors
 from context import (
     CODE_INSTRUCTIONS,
     PROJECT_INSTRUCTIONS,
@@ -36,7 +36,7 @@ from resource_limits import (
     ResourceLimits,
 )
 
-load_dotenv(override=True)
+load_dotenv()
 
 resource_limits = ResourceLimits.from_environment()
 analysis_capacity = AnalysisCapacity(
@@ -51,24 +51,7 @@ app.add_middleware(
     path_limits=resource_limits.request_body_limits,
 )
 
-cors_origins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-    "http://frontend:3000",
-]
-
-if os.getenv("ENVIRONMENT") == "production":
-    cors_origins.append("*")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+install_cors(app, CorsPolicy.from_environment())
 
 
 class AnalyzeRequest(BaseModel):
