@@ -10,34 +10,32 @@ AI-generated code is everywhere, and it's getting better at looking correct whil
 
 Security analysis tooling hasn't kept up with this. Static analysis still thinks its job ends at the source code boundary. Dependency scanners, container scanners, infrastructure scanners—all talking past each other, dumping findings in formats that assume you have time to cross-reference everything manually. I wanted to see what it would look like to build something that actually treats security as a system-wide concern and does something useful with the output.
 
-This is an infrastructure-complete, deployment-ready software security analysis platform. It's a full-stack build consisting of a FastAPI backend, a Next.js frontend exported as static assets and served from the same container, a custom MCP server that wraps OpenGrep and Trivy behind a unified scanning interface, and an OpenAI Agents SDK workflow that analyses, contextualises, and prioritises findings. Infrastructure is provisioned through Terraform for both Azure Container Apps and Google Cloud Run, with cloud-native secret management, cross-platform container builds, and deployment workflows included in the repository.
+This is an infrastructure-complete, deployment-ready software security analysis platform. It's a full-stack build consisting of a FastAPI backend, a Next.js frontend exported as static assets and served from the same container, a custom MCP server that wraps OpenGrep and Trivy behind a unified scanning interface, and an OpenAI Agents SDK workflow that analyses, contextualises, and prioritises findings. Infrastructure is provisioned through Terraform for both Azure Container Apps and Google Cloud Run, with cloud-native secret management, cross-platform container builds, and automated CI included in the repository.
 
 ## Architecture
 
 ```text
-Repository
-    │
+Next.js UI
+    │ API request
+    ▼
+FastAPI Backend
+    │ starts agent run
+    ▼
+Analysis Agent (OpenAI Agents SDK)
+    │ MCP tool call
     ▼
 Custom MCP Server
-    │
     ├── OpenGrep ──► Static code findings
-    │
     └── Trivy ─────► Dependency / container / supply-chain findings
-            │
-            ▼
-      FastAPI Backend
-            │
-            ▼
-      Analysis Agent (OpenAI Agents SDK)
-            │
-            ▼
-     Structured Security Report
-            │
-            ▼
-        Next.js UI (static export, served from same container)
+    │
+    ▼
+Normalised Findings ──► Analysis Agent ──► Structured Security Report
+                                                │
+                                                ▼
+                                    FastAPI Backend ──► Next.js UI
 ```
 
-The frontend provides a natural-language interface for repository analysis. Scan requests are routed through the FastAPI backend, which orchestrates the MCP server, collects findings from OpenGrep and Trivy, and passes normalised results into the analysis workflow. The agent synthesises findings into structured reports with prioritised remediation guidance rather than exposing raw scanner output directly.
+The frontend sends scan requests to the FastAPI backend, which starts the analysis agent with access to the unified MCP server. The agent invokes the MCP scan tool; the server dispatches work to OpenGrep and Trivy and returns normalised findings. The agent then produces a structured report that FastAPI returns to the frontend.
 
 ## Why I Built It This Way
 
@@ -45,7 +43,7 @@ The frontend provides a natural-language interface for repository analysis. Scan
 
 **Scanner replaceability.** Semgrep's licensing overhauls have been pulling features and rule sets behind Pro tiers with little warning, which makes any backend tightly coupled to it brittle by default. I went with OpenGrep to keep access to the rule ecosystem without waking up to find my scanner's core functionality paywalled. More importantly, findings are normalised before they hit the analysis layer, so the scanner itself is swappable without touching the rest of the system. If OpenGrep goes sideways too, I swap the scanner and the rest of the platform keeps working.
 
-**A custom MCP server for unified scanning.** Rather than bolting scanners directly into the backend, I built a dedicated MCP server that exposes OpenGrep and Trivy through a standardised interface. The backend talks to one protocol instead of managing multiple scanner integrations, and the analysis workflow consumes normalised findings without caring which tool produced them. This keeps scanner orchestration isolated from application logic, simplifies future scanner additions, and avoids tightly coupling the platform to any single security tool.
+**A custom MCP server for unified scanning.** Rather than bolting scanners directly into the backend, I built a dedicated MCP server that exposes OpenGrep and Trivy through a standardised interface. The analysis agent uses one MCP interface instead of managing multiple scanner integrations, and consumes normalised findings without caring which tool produced them. This keeps scanner orchestration isolated from application logic, simplifies future scanner additions, and avoids tightly coupling the platform to any single security tool.
 
 **Agent-assisted security analysis.** Security scanners are excellent at producing findings and considerably less helpful at connecting them. The platform uses an OpenAI Agents SDK workflow that consumes normalised findings from the MCP layer, correlates results across OpenGrep and Trivy, identifies recurring security themes spanning multiple layers of the stack, and generates consolidated security assessments with technical context and remediation guidance. Instead of treating each scanner as an isolated source of output, the platform produces a unified view of application security across source code, dependencies, containers, and supply-chain components.
 
@@ -101,4 +99,4 @@ Secrets are injected through Azure Key Vault or GCP Secret Manager rather than e
 
 ## What's Next
 
-The current deployment model provisions infrastructure into my own cloud accounts, but the Terraform modules and deployment workflow are already structured in a way that could support a BYOC (Bring Your Own Cloud) model. A future iteration would allow users to deploy the entire platform directly into their own Azure or GCP environments, keeping source code, scan results, and operational data within infrastructure they control.
+The current deployment model provisions infrastructure into my own cloud accounts, but the provider-specific Terraform stacks are structured in a way that could support a BYOC (Bring Your Own Cloud) model. A future iteration would allow users to deploy the entire platform directly into their own Azure or GCP environments, keeping source code, scan results, and operational data within infrastructure they control.
