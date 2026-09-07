@@ -11,10 +11,15 @@ from dotenv import load_dotenv
 from agents import Agent, Runner, trace
 
 from context import (
-    CODE_INSTRUCTIONS, PROJECT_INSTRUCTIONS, IMAGE_INSTRUCTIONS,
-    get_code_prompt, get_project_prompt, get_image_prompt, enhance_summary,
+    CODE_INSTRUCTIONS,
+    PROJECT_INSTRUCTIONS,
+    IMAGE_INSTRUCTIONS,
+    get_code_prompt,
+    get_project_prompt,
+    get_image_prompt,
+    enhance_summary,
 )
-from mcp_servers import create_trivy_server, create_opengrep_server
+from mcp_servers import create_scanner_server
 
 load_dotenv(override=True)
 
@@ -57,13 +62,17 @@ class SecurityIssue(BaseModel):
         description="The specific vulnerable code snippet that demonstrates the issue"
     )
     fix: str = Field(description="Recommended code fix or mitigation strategy")
-    cvss_score: float = Field(description="CVSS score from 0.0 to 10.0 representing severity")
+    cvss_score: float = Field(
+        description="CVSS score from 0.0 to 10.0 representing severity"
+    )
     severity: str = Field(description="Severity level: critical, high, medium, or low")
 
 
 class SecurityReport(BaseModel):
     summary: str = Field(description="Executive summary of the security analysis")
-    issues: List[SecurityIssue] = Field(description="List of identified security vulnerabilities")
+    issues: List[SecurityIssue] = Field(
+        description="List of identified security vulnerabilities"
+    )
 
 
 def check_api_keys() -> None:
@@ -78,6 +87,7 @@ def sort_report(report: SecurityReport) -> SecurityReport:
 
 # --- Code analysis (single .py file or pasted code) ---
 
+
 @app.post("/api/analyze", response_model=SecurityReport)
 async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
     if not request.code.strip():
@@ -86,19 +96,23 @@ async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
 
     try:
         with trace("Code Analysis"):
-            async with create_opengrep_server() as opengrep:
+            async with create_scanner_server() as scanners:
                 agent = Agent(
                     name="Security Researcher",
                     instructions=CODE_INSTRUCTIONS,
                     model="gpt-4.1-mini",
-                    mcp_servers=[opengrep],
+                    mcp_servers=[scanners],
                     output_type=SecurityReport,
                 )
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as temp:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".py", delete=False
+                ) as temp:
                     temp.write(request.code)
                     temp_path = temp.name
                 try:
-                    result = await Runner.run(agent, input=get_code_prompt(request.code, temp_path))
+                    result = await Runner.run(
+                        agent, input=get_code_prompt(request.code, temp_path)
+                    )
                     report = sort_report(result.final_output_as(SecurityReport))
                     report.summary = enhance_summary(len(request.code), report.summary)
                     return report
@@ -112,6 +126,7 @@ async def analyze_code(request: AnalyzeRequest) -> SecurityReport:
 
 
 # --- Project analysis (zip upload) ---
+
 
 @app.post("/api/analyze-project", response_model=SecurityReport)
 async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
@@ -134,12 +149,12 @@ async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
         os.unlink(zip_path)
 
         with trace("Project Analysis"):
-            async with create_trivy_server() as trivy, create_opengrep_server() as opengrep:
+            async with create_scanner_server() as scanners:
                 agent = Agent(
                     name="Security Researcher",
                     instructions=PROJECT_INSTRUCTIONS,
                     model="gpt-4.1-mini",
-                    mcp_servers=[trivy, opengrep],
+                    mcp_servers=[scanners],
                     output_type=SecurityReport,
                 )
                 result = await Runner.run(agent, input=get_project_prompt(extract_dir))
@@ -157,6 +172,7 @@ async def analyze_project(file: UploadFile = File(...)) -> SecurityReport:
 
 # --- Container image analysis ---
 
+
 @app.post("/api/analyze-image", response_model=SecurityReport)
 async def analyze_image(request: ImageRequest) -> SecurityReport:
     if not request.image.strip():
@@ -165,15 +181,17 @@ async def analyze_image(request: ImageRequest) -> SecurityReport:
 
     try:
         with trace("Image Analysis"):
-            async with create_trivy_server() as trivy:
+            async with create_scanner_server() as scanners:
                 agent = Agent(
                     name="Security Researcher",
                     instructions=IMAGE_INSTRUCTIONS,
                     model="gpt-4.1-mini",
-                    mcp_servers=[trivy],
+                    mcp_servers=[scanners],
                     output_type=SecurityReport,
                 )
-                result = await Runner.run(agent, input=get_image_prompt(request.image.strip()))
+                result = await Runner.run(
+                    agent, input=get_image_prompt(request.image.strip())
+                )
                 report = sort_report(result.final_output_as(SecurityReport))
                 report.summary = f"Analyzed container image '{request.image.strip()}'. {report.summary}"
                 return report

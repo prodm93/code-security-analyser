@@ -24,10 +24,10 @@ Display issues sorted by CVSS score, highest first.
 
 CODE_INSTRUCTIONS = f"""
 You are a cybersecurity researcher analyzing a single Python file.
-You have access to OpenGrep, a SAST (Static Application Security Testing) tool.
+You have access to a unified security scanning tool backed by OpenGrep.
 
 REQUIREMENTS:
-1. Call `opengrep_scan` ONCE with the provided file path to find code-level vulnerabilities.
+1. Call `scan` ONCE with target_type `code` and the provided file path.
 2. After reviewing OpenGrep results, conduct your own additional code review for anything it missed.
 3. In your summary, state: "OpenGrep found X issues, and I identified Y additional issues"
 
@@ -38,32 +38,26 @@ hardcoded secrets, weak cryptography, path traversal, and other OWASP Top 10 cod
 
 PROJECT_INSTRUCTIONS = f"""
 You are a cybersecurity researcher analyzing a software project directory.
-You have access to two security scanning tools:
+You have access to one unified security scanning tool backed by two scanners:
 
-1. **OpenGrep** (SAST): Call `opengrep_scan` with the project directory path.
-   Finds code-level vulnerabilities across all source files.
+1. **OpenGrep** (SAST): Finds code-level vulnerabilities across all source files.
 
-2. **Trivy** (Dependency & Secret Scanning): Call `scan_filesystem` with the project directory path.
-   Set scanType to ["vuln", "misconfig", "secret", "license"] and severities to
-   ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]. Set outputFormat to "json".
-   Finds dependency CVEs (requirements.txt, package.json, etc.), hardcoded secrets, misconfigurations.
+2. **Trivy** (Dependency & Secret Scanning): Finds dependency CVEs, secrets,
+   misconfigurations, and license issues.
 
 REQUIREMENTS:
-1. Call `opengrep_scan` ONCE with the project directory path.
-2. Call `scan_filesystem` ONCE with the same path and ALL scan types enabled.
-3. Review results from both tools and add your own findings.
-4. In your summary, state: "OpenGrep found X issues, Trivy found Y issues, and I identified Z additional issues"
+1. Call `scan` ONCE with target_type `project` and the provided directory path.
+2. Review the normalized results from both scanners and add your own findings.
+3. In your summary, state: "OpenGrep found X issues, Trivy found Y issues, and I identified Z additional issues"
 {_COMMON_OUTPUT}
 """
 
 IMAGE_INSTRUCTIONS = f"""
 You are a cybersecurity researcher analyzing a container image.
-You have access to Trivy, a container security scanner.
+You have access to a unified security scanning tool backed by Trivy.
 
 REQUIREMENTS:
-1. Call `scan_image` ONCE with the provided image name as `target`.
-   Set scanType to ["vuln", "misconfig", "secret", "license"] and severities to
-   ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]. Set outputFormat to "json".
+1. Call `scan` ONCE with target_type `image` and the provided image name as `target`.
 2. Review the results and add any additional observations.
 3. In your summary, state: "Trivy found X issues in the container image"
 
@@ -85,7 +79,11 @@ def get_code_prompt(code: str, temp_path: str) -> str:
 def get_project_prompt(project_dir: str) -> str:
     file_listing = []
     for root, dirs, files in os.walk(project_dir):
-        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", "node_modules", ".venv", "venv"}]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in {".git", "__pycache__", "node_modules", ".venv", "venv"}
+        ]
         for f in files:
             rel = os.path.relpath(os.path.join(root, f), project_dir)
             file_listing.append(rel)
@@ -104,8 +102,8 @@ def get_image_prompt(image_name: str) -> str:
     return f"""Analyze the container image for security vulnerabilities:
     IMAGE: {image_name}
 
-    Use Trivy's scan_image tool to scan this image for OS package vulnerabilities,
-    application dependency CVEs, embedded secrets, and misconfigurations."""
+    Use the unified scan tool for OS package vulnerabilities, application dependency
+    CVEs, embedded secrets, misconfigurations, and license issues."""
 
 
 def enhance_summary(code_length: int, agent_summary: str) -> str:
