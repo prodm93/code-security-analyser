@@ -81,19 +81,7 @@ docker run -p 8000:8000 --env-file .env security-platform
 
 ## Deployment
 
-Infrastructure is defined entirely through Terraform. The same application can be deployed to either Azure Container Apps or Google Cloud Run using provider-specific variable files.
-
-```bash
-cd terraform/
-
-terraform init
-
-terraform apply -var-file="azure.tfvars"
-
-# or
-
-terraform apply -var-file="gcp.tfvars"
-```
+Infrastructure is defined in separate Terraform stacks for Azure Container Apps and Google Cloud Run. Deployment is manual and disabled by default; see the [production deployment guide](docs/deployment.md) for remote-state, OIDC, and workflow setup.
 
 Secrets are injected through Azure Key Vault or GCP Secret Manager rather than embedded in container images or Terraform configuration.
 
