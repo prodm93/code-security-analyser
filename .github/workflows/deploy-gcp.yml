@@ -1,0 +1,119 @@
+name: Deploy GCP
+run-name: GCP production ${{ inputs.operation }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Terraform operation
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      confirmation:
+        description: Type APPLY-GCP-PRODUCTION to apply
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-gcp-production
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: Terraform GCP production
+    if: ${{ github.ref == 'refs/heads/main' && vars.ENABLE_GCP_DEPLOYMENT == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: gcp-production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_TFSTATE_BUCKET: ${{ vars.GCP_TFSTATE_BUCKET }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION }}
+      TF_VAR_service_name: ${{ vars.GCP_SERVICE_NAME }}
+      TF_VAR_openai_api_key_secret_name: ${{ vars.GCP_OPENAI_API_KEY_SECRET_NAME }}
+      TF_VAR_analysis_api_key_secret_name: ${{ vars.GCP_ANALYSIS_API_KEY_SECRET_NAME }}
+      TF_VAR_allow_public_access: "false"
+      TF_VAR_docker_image_tag: ${{ github.sha }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform/gcp
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment request
+        working-directory: .
+        env:
+          DEPLOY_OPERATION: ${{ inputs.operation }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          bash scripts/cd/validate_deployment.sh \
+            APPLY-GCP-PRODUCTION \
+            GCP_WORKLOAD_IDENTITY_PROVIDER \
+            GCP_DEPLOY_SERVICE_ACCOUNT \
+            GCP_TFSTATE_BUCKET \
+            TF_VAR_project_id \
+            TF_VAR_region \
+            TF_VAR_service_name \
+            TF_VAR_openai_api_key_secret_name \
+            TF_VAR_analysis_api_key_secret_name
+
+      - name: Verify runner ownership
+        working-directory: .
+        run: bash scripts/ci/check_runner_ownership.sh
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.6
+          terraform_wrapper: false
+
+      - name: Authenticate to GCP with OIDC
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          project_id: ${{ env.TF_VAR_project_id }}
+          create_credentials_file: true
+          export_environment_variables: true
+          cleanup_credentials: true
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check
+
+      - name: Initialize remote state
+        run: |
+          terraform init \
+            -backend-config="bucket=${GCP_TFSTATE_BUCKET}" \
+            -backend-config="prefix=cyber-analyzer/production" \
+            -input=false \
+            -lockfile=readonly
+
+      - name: Select production workspace
+        run: terraform workspace select -or-create production
+
+      - name: Validate Terraform
+        run: terraform validate
+
+      - name: Create deployment plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Apply reviewed plan
+        if: ${{ inputs.operation == 'apply' }}
+        run: terraform apply -auto-approve -input=false -no-color tfplan

@@ -1,0 +1,126 @@
+name: Deploy Azure
+run-name: Azure production ${{ inputs.operation }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Terraform operation
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      confirmation:
+        description: Type APPLY-AZURE-PRODUCTION to apply
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-azure-production
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: Terraform Azure production
+    if: ${{ github.ref == 'refs/heads/main' && vars.ENABLE_AZURE_DEPLOYMENT == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: azure-production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CORE_OUTPUT: none
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TFSTATE_RESOURCE_GROUP: ${{ vars.AZURE_TFSTATE_RESOURCE_GROUP }}
+      AZURE_TFSTATE_STORAGE_ACCOUNT: ${{ vars.AZURE_TFSTATE_STORAGE_ACCOUNT }}
+      AZURE_TFSTATE_CONTAINER: ${{ vars.AZURE_TFSTATE_CONTAINER }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_project_name: ${{ vars.AZURE_PROJECT_NAME }}
+      TF_VAR_resource_group_name: ${{ vars.AZURE_RESOURCE_GROUP_NAME }}
+      TF_VAR_key_vault_id: ${{ vars.AZURE_KEY_VAULT_ID }}
+      TF_VAR_openai_api_key_secret_id: ${{ vars.AZURE_OPENAI_API_KEY_SECRET_ID }}
+      TF_VAR_analysis_api_key_secret_id: ${{ vars.AZURE_ANALYSIS_API_KEY_SECRET_ID }}
+      TF_VAR_allow_public_access: "false"
+      TF_VAR_docker_image_tag: ${{ github.sha }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform/azure
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment request
+        working-directory: .
+        env:
+          DEPLOY_OPERATION: ${{ inputs.operation }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          bash scripts/cd/validate_deployment.sh \
+            APPLY-AZURE-PRODUCTION \
+            AZURE_CLIENT_ID \
+            AZURE_TENANT_ID \
+            AZURE_SUBSCRIPTION_ID \
+            AZURE_TFSTATE_RESOURCE_GROUP \
+            AZURE_TFSTATE_STORAGE_ACCOUNT \
+            AZURE_TFSTATE_CONTAINER \
+            TF_VAR_project_name \
+            TF_VAR_resource_group_name \
+            TF_VAR_key_vault_id \
+            TF_VAR_openai_api_key_secret_id \
+            TF_VAR_analysis_api_key_secret_id
+
+      - name: Verify runner ownership
+        working-directory: .
+        run: bash scripts/ci/check_runner_ownership.sh
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.6
+          terraform_wrapper: false
+
+      - name: Authenticate to Azure with OIDC
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check
+
+      - name: Initialize remote state
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${AZURE_TFSTATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${AZURE_TFSTATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${AZURE_TFSTATE_CONTAINER}" \
+            -backend-config="key=cyber-analyzer/production.tfstate" \
+            -backend-config="use_azuread_auth=true" \
+            -input=false \
+            -lockfile=readonly
+
+      - name: Select production workspace
+        run: terraform workspace select -or-create production
+
+      - name: Validate Terraform
+        run: terraform validate
+
+      - name: Create deployment plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Apply reviewed plan
+        if: ${{ inputs.operation == 'apply' }}
+        run: terraform apply -auto-approve -input=false -no-color tfplan
