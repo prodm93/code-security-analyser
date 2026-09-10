@@ -10,7 +10,7 @@ AI-generated code is everywhere, and it's getting better at looking correct whil
 
 Security analysis tooling hasn't kept up with this. Static analysis still thinks its job ends at the source code boundary. Dependency scanners, container scanners, infrastructure scanners—all talking past each other, dumping findings in formats that assume you have time to cross-reference everything manually. I wanted to see what it would look like to build something that actually treats security as a system-wide concern and does something useful with the output.
 
-This is an infrastructure-complete, deployment-ready software security analysis platform. It's a full-stack build consisting of a FastAPI backend, a Next.js frontend exported as static assets and served from the same container, a custom MCP server that wraps OpenGrep and Trivy behind a unified scanning interface, and an OpenAI Agents SDK workflow that analyses, contextualises, and prioritises findings. Infrastructure is provisioned through Terraform for both Azure Container Apps and Google Cloud Run, with cloud-native secret management, cross-platform container builds, and automated CI included in the repository.
+This is a deployment-ready software security analysis platform. It's a full-stack build consisting of a FastAPI backend, a Next.js frontend exported as static assets and served from the same container, a custom MCP server that wraps OpenGrep and Trivy behind a unified scanning interface, and an OpenAI Agents SDK workflow that analyses, contextualises, and prioritises findings. Infrastructure is provisioned through Terraform for both Azure Container Apps and Google Cloud Run, with cloud-native secret management, cross-platform container builds, automated CI, and manual deployment workflows that are disabled by default.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ The frontend sends scan requests to the FastAPI backend, which starts the analys
 
 **Terraform and multi-cloud deployment.** Infrastructure is defined entirely through Terraform and supports deployment to both Azure Container Apps and Google Cloud Run. The objective wasn't multi-cloud for its own sake; it was ensuring the application architecture remained portable and avoided unnecessary cloud-specific coupling. The same application can be deployed across providers without requiring changes to the application layer.
 
-**Cross-platform builds by default.** Development happens on ARM64 hardware while deployment targets AMD64 cloud environments. Cross-platform container builds are baked into the workflow using Docker Buildx, producing reproducible images that behave consistently across local and cloud environments.
+**Cross-platform builds by default.** Development happens on ARM64 hardware while deployment targets AMD64 cloud environments. Local, CI, and Terraform builds explicitly target `linux/amd64`, producing consistent images across development and cloud environments.
 
 **Secrets without embedding.** This wasn't just about keeping credentials out of source control. I wanted the same container image to be deployable across local development, Azure Container Apps, and Google Cloud Run without modification. Secret injection is handled by Azure Key Vault or GCP Secret Manager at deployment time, keeping credential management in the infrastructure layer and allowing the application itself to remain environment-agnostic.
 
@@ -63,7 +63,7 @@ The frontend sends scan requests to the FastAPI backend, which starts the analys
 
 **MCP compatibility management.** The custom MCP server became a critical integration boundary between the application and scanning layer. MCP compatibility is pinned explicitly rather than floating on latest releases, avoiding situations where upstream protocol changes silently break scanner orchestration or tool invocation behaviour.
 
-**ARM64 to AMD64 deployment.** Development was performed on Apple Silicon while deployment targets expected AMD64 container images. Cross-platform builds were incorporated into the workflow from the outset using Docker Buildx, producing reproducible images that behave consistently across local and cloud environments.
+**ARM64 to AMD64 deployment.** Development was performed on Apple Silicon while deployment targets expected AMD64 container images. Explicit platform targets keep local, CI, and Terraform builds aligned with the deployment architecture.
 
 **Relative URL routing in production.** Because the Next.js frontend is exported as static assets and served by FastAPI, frontend routing needed to work consistently whether the application was running locally or behind Azure Container Apps or Cloud Run. The frontend build was configured around deployment-agnostic asset paths and routing so deployment targets can change without requiring environment-specific frontend builds.
 
